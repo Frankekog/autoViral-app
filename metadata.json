@@ -1,0 +1,7 @@
+{
+  "name": "AutoViral - AI Video Generator",
+  "description": "Create viral short & long form videos on autopilot. Generates scripts, voiceovers, and video content automatically.",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}
