@@ -1,12 +1,43 @@
 import { GoogleGenAI, Type, Schema, Modality } from "@google/genai";
 import { ScriptData, AspectRatio } from '../types';
 
-const getClient = () => {
-  const apiKey = process.env.API_KEY;
-  if (!apiKey) {
-    throw new Error("API Key not found in environment");
+// Safely retrieve the API Key from the environment
+const getApiKey = (): string => {
+  // We must use process.env.API_KEY as per guidelines.
+  let key: string | undefined;
+  
+  // Try different ways the environment might expose the key
+  try {
+    // 1. Standard Node-style process.env (often injected by build tools)
+    key = process.env.API_KEY;
+  } catch (e) {
+    // Silently continue to next check
   }
-  return new GoogleGenAI({ apiKey });
+
+  if (!key) {
+    try {
+      // 2. Browser-global fallback (Some environments inject here)
+      key = (window as any).process?.env?.API_KEY || (window as any).API_KEY;
+    } catch (e) {
+      // Silently continue
+    }
+  }
+
+  if (!key) {
+    // Detailed error to help the non-developer user troubleshoot Vercel specifically
+    throw new Error(
+      "API Key missing. FIX STEPS: " +
+      "1. In Vercel Project Settings > Environment Variables, check if 'API_KEY' exists. " +
+      "2. If it does, go to the 'Deployments' tab and click 'Redeploy' on your latest attempt. " +
+      "Environment variables are only added during a fresh build!"
+    );
+  }
+  
+  return key;
+};
+
+const getClient = () => {
+  return new GoogleGenAI({ apiKey: getApiKey() });
 };
 
 // Helper to write string to DataView
@@ -67,7 +98,6 @@ export const generateViralScript = async (
   
   const schemaProperties: any = {
       title: { type: Type.STRING, description: "A clickbait/viral title for the video" },
-      // If custom script is provided, we won't ask Gemini to generate 'script'
       visualPrompt: { type: Type.STRING, description: `A detailed visual description for the video generation AI. Style: ${visualStyle}. Focus on movement, lighting, and subject.` },
       tags: { 
         type: Type.ARRAY, 
@@ -78,7 +108,6 @@ export const generateViralScript = async (
 
   const required = ["title", "visualPrompt", "tags"];
 
-  // If no custom script, we need Gemini to generate one
   if (!customScript) {
       schemaProperties.script = { type: Type.STRING, description: `The spoken script for the video. Target duration: ${duration}.` };
       required.push("script");
@@ -127,7 +156,7 @@ export const generateViralScript = async (
   }
 
   const response = await ai.models.generateContent({
-    model: 'gemini-2.5-flash',
+    model: 'gemini-3-flash-preview',
     contents: prompt,
     config: {
       responseMimeType: "application/json",
@@ -140,7 +169,6 @@ export const generateViralScript = async (
   
   const result = JSON.parse(text) as ScriptData;
 
-  // Inject the custom script back into the result if we used one
   if (customScript) {
       result.script = customScript;
   }
@@ -149,18 +177,16 @@ export const generateViralScript = async (
 };
 
 const VOICE_MAPPING: Record<string, string> = {
-  'eleven_adam': 'Charon',   // Adam (Deep/Narrative) -> Charon
-  'eleven_rachel': 'Kore',   // Rachel (Clear/Calm) -> Kore
-  'eleven_antoni': 'Fenrir', // Antoni (Deep/Warm) -> Fenrir
-  'eleven_bella': 'Zephyr',  // Bella (Soft/Young) -> Zephyr
-  'eleven_josh': 'Fenrir',   // Josh (Deep/Resonant) -> Fenrir
+  'eleven_adam': 'Charon',
+  'eleven_rachel': 'Kore',
+  'eleven_antoni': 'Fenrir',
+  'eleven_bella': 'Zephyr',
+  'eleven_josh': 'Fenrir',
 };
 
 // 2. Generate Voiceover (TTS)
 export const generateVoiceover = async (text: string, voiceName: string): Promise<string> => {
   const ai = getClient();
-  
-  // Map simulated voices to actual Gemini voices
   const effectiveVoice = VOICE_MAPPING[voiceName] || voiceName;
 
   const response = await ai.models.generateContent({
@@ -170,7 +196,7 @@ export const generateVoiceover = async (text: string, voiceName: string): Promis
       responseModalities: [Modality.AUDIO],
       speechConfig: {
         voiceConfig: {
-          prebuiltVoiceConfig: { voiceName: effectiveVoice }, // Dynamic voice selection
+          prebuiltVoiceConfig: { voiceName: effectiveVoice },
         },
       },
     },
@@ -179,7 +205,6 @@ export const generateVoiceover = async (text: string, voiceName: string): Promis
   const base64Audio = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
   if (!base64Audio) throw new Error("No audio generated");
 
-  // Decode Base64 to binary
   const binaryString = atob(base64Audio);
   const len = binaryString.length;
   const bytes = new Uint8Array(len);
@@ -187,7 +212,6 @@ export const generateVoiceover = async (text: string, voiceName: string): Promis
     bytes[i] = binaryString.charCodeAt(i);
   }
   
-  // Create WAV blob (24kHz is standard for this model) with header so <audio> tag can play it
   const wavBlob = createWavBlob(bytes, 24000);
   return URL.createObjectURL(wavBlob); 
 };
@@ -202,7 +226,6 @@ export const generateVideo = async (
   
   onProgress("Initializing generation request...");
   
-  // Note: Using fast-generate-preview for speed in this demo
   let operation = await ai.models.generateVideos({
     model: 'veo-3.1-fast-generate-preview',
     prompt: prompt,
@@ -216,7 +239,7 @@ export const generateVideo = async (
   onProgress("Rendering video (this may take 1-2 minutes)...");
 
   while (!operation.done) {
-    await new Promise(resolve => setTimeout(resolve, 5000)); // Poll every 5s
+    await new Promise(resolve => setTimeout(resolve, 5000));
     onProgress("Still rendering... Artificial Intelligence is painting pixels...");
     operation = await ai.operations.getVideosOperation({operation: operation});
   }
@@ -228,9 +251,9 @@ export const generateVideo = async (
   const downloadLink = operation.response?.generatedVideos?.[0]?.video?.uri;
   if (!downloadLink) throw new Error("No video URI in response");
 
-  // Fetch with API key to get the actual blob
   onProgress("Downloading final video...");
-  const response = await fetch(`${downloadLink}&key=${process.env.API_KEY}`);
+  // Must append the API key to the download link
+  const response = await fetch(`${downloadLink}&key=${getApiKey()}`);
   if (!response.ok) throw new Error("Failed to download video bytes");
   
   const blob = await response.blob();
@@ -247,7 +270,6 @@ export const generateThumbnail = async (prompt: string): Promise<string> => {
         }
     });
     
-    // Iterate parts to find the inline data
     let base64Data = null;
     if (response.candidates?.[0]?.content?.parts) {
         for (const part of response.candidates[0].content.parts) {
