@@ -6,6 +6,9 @@
     <title>AutoViral - Passive Income Generator</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
+      // Safety shim for environments where process.env isn't globally defined
+      window.process = window.process || { env: {} };
+      
       tailwind.config = {
         theme: {
           extend: {
@@ -56,6 +59,9 @@
         background-color: #020617; /* Slate 950 */
         color: #f8fafc;
       }
+      .custom-scrollbar::-webkit-scrollbar {
+        width: 4px;
+      }
     </style>
   <script type="importmap">
 {
@@ -67,10 +73,8 @@
   }
 }
 </script>
-<link rel="stylesheet" href="/index.css">
 </head>
   <body>
     <div id="root"></div>
-  <script type="module" src="/index.tsx"></script>
-</body>
+  </body>
 </html>
